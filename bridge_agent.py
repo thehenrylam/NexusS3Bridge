@@ -16,8 +16,9 @@ NEXUS_CONFIG="{}/client_config.yml".format(NEXUS_APPDIR)
 
 BRIDGE_APPDIR="/home/ubuntu/NexusS3Bridge"
 BRIDGE_FILE_FORCE_SWEEP="{}/command_files/force_sweep.bridge".format(BRIDGE_APPDIR)
+BRIDGE_FILE_SHUTDOWN="{}/command_files/shutdown.bridge".format(BRIDGE_APPDIR)
 
-NUMBER_OF_SECONDS_PER_SWEEP = 600
+NUMBER_OF_SECONDS_PER_SWEEP = 900
 
 sys.path.append( NEXUS_SCRDIR )
 
@@ -265,13 +266,19 @@ def sweep_apply_clamp_policy(policy, set_nx_objects, set_s3_objects):
 
     return policy
 
-def report_policy(policy):
+def report_policy(policy, nx_repo_alias, s3_repo_alias):
     print("Sweep Delta:")
     for category in policy.keys():
         set_add = policy[ category ]["add"]
         set_del = policy[ category ]["del"]
 
-        print("Delta: {} -----".format( category ))
+        curr_repo = "null"
+        if (category == "nx"):
+            curr_repo = nx_repo_alias
+        elif (category == "s3"):
+            curr_repo = s3_repo_alias
+
+        print("Delta ({}): {} -----".format( category, curr_repo ))
 
         if ((len(set_add) + len(set_del)) == 0):
             print("* No Change *")
@@ -318,8 +325,8 @@ def perform_sweep(nx_repo_alias, s3_repo_alias, file_deletion_threshold=300, det
 
     # Report the object list (RAW)
     if detailed_report:
-        report_object_list(list(nx_objects), "NX object list RAW")
-        report_object_list(list(s3_objects), "S3 object list RAW")
+        report_object_list(list(nx_objects), "Full List (NX): {}".format( nx_repo_alias ))
+        report_object_list(list(s3_objects), "Full List (S3): {}".format( s3_repo_alias ))
 
     # Get the dictionary of locked objects
     dict_nx_locked_objects = get_filetype_by_regex( nx_objects, "lock", True )
@@ -333,8 +340,8 @@ def perform_sweep(nx_repo_alias, s3_repo_alias, file_deletion_threshold=300, det
     s3_objects = s3_objects - set_s3_locked_objects
 
     # Report the object list
-    # report_object_list(list(nx_objects), "NX object list")
-    # report_object_list(list(s3_objects), "S3 object list")
+    # report_object_list(list(nx_objects), "Trimmed List (NX): {}".format( nx_repo_alias ))
+    # report_object_list(list(s3_objects), "Trimmed List (S3): {}".format( s3_repo_alias ))
 
     # Set the base policy   (Nexus <-add/del-- S3)
     policy = sweep_set_standard_policy(policy, nx_objects, s3_objects)
@@ -346,7 +353,7 @@ def perform_sweep(nx_repo_alias, s3_repo_alias, file_deletion_threshold=300, det
     policy = sweep_apply_clamp_policy(policy, nx_objects, s3_objects)
 
     # Provide the policy deltas
-    report_policy( policy )
+    report_policy( policy, nx_repo_alias, s3_repo_alias )
 
     # Apply the policy (First ADD, then DELETE)
     apply_policy( policy, nx_repo_alias, s3_repo_alias )
@@ -361,8 +368,13 @@ def main():
     except FileExistsError:
         pass
 
+    if not os.path.exists(BRIDGE_FILE_SHUTDOWN):
+        os.mknod(BRIDGE_FILE_SHUTDOWN)
+        time.sleep(1)
+
     if not os.path.exists(BRIDGE_FILE_FORCE_SWEEP):
         os.mknod(BRIDGE_FILE_FORCE_SWEEP)
+        time.sleep(1)
 
     file_deletion_threshold = NUMBER_OF_SECONDS_PER_SWEEP + 1
 
@@ -372,15 +384,26 @@ def main():
 
         authorized_to_execute = True
 
+        shutdown_file_age = datetime.datetime.now().timestamp() - os.path.getmtime(BRIDGE_FILE_SHUTDOWN)
+        if (shutdown_file_age < 1.05):
+            print("Bridge exitted at {}".format( datetime.datetime.now() ))
+            exit(0)
+
         sweep_file_age = datetime.datetime.now().timestamp() - os.path.getmtime(BRIDGE_FILE_FORCE_SWEEP)
         if (sweep_file_age >= 1.05):
             authorized_to_execute = False
 
         if (authorized_to_execute) or (sweep_counter <= 0):
             print("Execute!")
-            nx_repo_alias = "bridge_raw"
-            s3_repo_alias = "raw"
-            # perform_sweep( nx_repo_alias, s3_repo_alias, file_deletion_threshold )
+            
+            nx_raw_repo_alias = "bridge_raw"
+            s3_raw_repo_alias = "raw"
+            perform_sweep( nx_raw_repo_alias, s3_raw_repo_alias, file_deletion_threshold )
+
+            nx_mvn_repo_alias = "bridge_mvn"
+            s3_mvn_repo_alias = "mvn"
+            perform_sweep( nx_mvn_repo_alias, s3_mvn_repo_alias, file_deletion_threshold )
+
             sweep_counter = NUMBER_OF_SECONDS_PER_SWEEP
         
         sweep_counter -= 1
