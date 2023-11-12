@@ -45,7 +45,7 @@ def get_filetype_by_regex(list_of_files, filetype, with_subname = False):
         m = re.match( regex_pattern, fname )
         if (m is None):
             continue
-        subname = match.groups()[0] if with_subname else None
+        subname = m.groups()[0] if with_subname else None
         dict_output[ fname ] = subname
 
     return dict_output
@@ -114,7 +114,7 @@ def upload_nexus(repo_alias, local_filepath, filepath):
     api_nexus.upload_nx(repo_alias, local_filepath, filepath)
     return
 
-def delete_s3(repo_alias, filepath):
+def delete_awss3(repo_alias, filepath):
     api_awss3.delete_s3(repo_alias, filepath)
 
 def download_awss3(repo_alias, filepath, local_filepath):
@@ -167,7 +167,7 @@ def apply_policy( policy, nx_repo_alias, s3_repo_alias ):
     for f in nx_del_obj:
         delete_nexus( nx_repo_alias, f )
     for f in s3_del_obj:
-        delete_nexus( s3_repo_alias, f )
+        delete_awss3( s3_repo_alias, f )
 
     nx_add_obj = list(policy["nx"]["add"])
     s3_add_obj = list(policy["s3"]["add"])
@@ -250,6 +250,9 @@ def sweep_apply_delete_policy(policy, set_nx_objects, lock_files):
 
     policy["nx"]["del"] |= files_to_delete
     policy["s3"]["del"] |= files_to_delete
+
+    policy["nx"]["add"] -= (files_to_delete | set(dict_deletion_requests.keys()))
+    policy["s3"]["add"] -= (files_to_delete | set(dict_deletion_requests.keys()))
 
     return policy
 
